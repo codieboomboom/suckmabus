@@ -17,6 +17,7 @@ BOT_STATE_REGISTER_PENDING_BUS_STOP_NUM = "pending_bus_stop_num"
 BOT_STATE_REGISTER_PENDING_BUS_STOP_ALIAS = "pending_bus_stop_alias"
 
 # Global startup
+# TODO: What if we want multi-user?
 curr_state = BOT_STATE_IDLE
     
 # Data store helper=========
@@ -34,7 +35,7 @@ def get_updates(offset=None):
     """Get updates from user"""
     params = {
         "timeout": 30, # long polling
-        "allowed_updates": ["message"]
+        "allowed_updates": ["message"] # TODO: Adjust here cuz not always will be purely message
     }
     if offset:
         params["offset"] = offset
@@ -55,13 +56,27 @@ def send_message(chat_id, text):
     }
     requests.post(url=f"{TELEGRAM_BOT_BASEURL}/sendMessage", json=json_message_to_send)
 
-def handle_register_bus_stop(args):
-    print(args)
+def start_register_bus_stop(chat_id):
+    text = "Please enter a bus stop number"
+    send_message(chat_id, text)
+    curr_state = BOT_STATE_REGISTER_PENDING_BUS_STOP_NUM
 
-def handle_deregister_bus_stops():
-    print("Deregistering")
+def validate_and_register_bus_stop_num(chat_id, message):
+    curr_state = BOT_STATE_REGISTER_PENDING_BUS_STOP_ALIAS
 
-def handle_check():
+def validate_and_register_bus_stop_alias(chat_id, message):
+    curr_state = BOT_STATE_IDLE
+
+def start_deregister_bus_stops(chat_id):
+    db = load_db()
+    if not db or "saved_bus_stops" not in db:
+        text = "There is no registered bus stops!"
+        send_message(chat_id, text)
+    
+    # TODO: Send a message containing inline keyboards of the alias bus stop to be removed
+    save_db()
+
+def start_check(chat_id):
     print("Checking")
 
 def handle_update(update):
@@ -79,36 +94,49 @@ def handle_update(update):
 
     print(f"Received: '{text}' from chat_id={chat_id}")
 
-    # Parse the command (first word) and arguments (rest)
-    parts = text.strip().split()
-    if not parts:
-        return
+    # Dispatch base on stage
+    if curr_state == BOT_STATE_IDLE:
+        """IDLE state is where the bot start off, signifying waiting for a command from user.
+        Some commands may be multi-stage and must return back into BOT_STATE_IDLE once it
+        finish it flow"""
 
-    command = parts[0].lower()
-    args = parts[1:]
+        # Parse the command (first word) and arguments (rest)
+        parts = text.strip().split()
+        if not parts:
+            return
 
-    # Dispatch
-    if command == "/start":
-        send_message(chat_id, "Hello! I'm your bus bot. Try /help")
+        command = parts[0].lower()
 
-    elif command == "/help":
-        send_message(chat_id,
-            "/register <bus_stop_no> - Register a bus stop\n"
-            "/deregister              - Remove a bus stop\n"
-            "/check <stop_or_alias>   - Check arrival timings"
-        )
+        if command == "/start":
+            send_message(chat_id, "Hello! I'm your bus bot. Try /help")
 
-    elif command == "/register":
-        handle_register_bus_stop(args)
+        elif command == "/help":
+            send_message(chat_id,
+                "/reg - Register a bus stop\n"
+                "/dereg - Remove a bus stop\n"
+                "/modify - Edit bus stop information\n"
+                "/check - Check arrival timings"
+            )
 
-    elif command == "/deregister":
-        handle_deregister_bus_stops()
+        elif command == "/reg":
+            start_register_bus_stop(chat_id)
 
-    elif command == "/check":
-        handle_check()
+        elif command == "/dereg":
+            handle_deregister_bus_stops(chat_id)
+
+        elif command == "/check":
+            handle_check(chat_id)
 
         else:
             send_message(chat_id, f"I don't understand you. Please try /help")
+
+    elif curr_state = BOT_STATE_REGISTER_PENDING_BUS_STOP_NUM:
+        """The registering of bus stop is awaiting for a bus stop number from user"""
+        pass
+
+    elif curr_state = BOT_STATE_REGISTER_PENDING_BUS_STOP_ALIAS:
+        """The registering of bus stop is awaiting for a bus stop alias from user"""
+        pass
 
 def fetch_all_bus_stops():
     url = f"{LTA_BASEURL}/BusStops"
@@ -136,6 +164,7 @@ def run():
     if not Path(DB_FILE).exists():
         save_db(data={})
 
+    #TODO: Cache here, but need invalidation scheme to refetch the db
     db = load_db()
     if "bus_stops" not in db:
         db["bus_stops"] = fetch_all_bus_stops()
