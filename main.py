@@ -21,6 +21,49 @@ class State(Enum):
     DEREGISTER_AWAITING_CONFIRM = auto()
     CHECK_AWAITING_SELECTION = auto()
 
+# ============== Sessions Management =====================
+sessions : dict[int] = {}
+
+def get_session(user_id: int) -> dict:
+    # Get session-specific data for the user identified
+    # by user_id
+    if user_id not in sessions:
+        sessions[user_id] = {
+            "state": State.IDLE,
+            "data": {}
+        }
+    return sessions[user_id]
+
+def reset_session(user_id: int):
+    # Reset the user_id session state back to IDLE
+    sessions[user_id] = {
+        "state": State.IDLE,
+        "data": {}
+    }
+
+def update_state_and_data(user_id: int, next_state: State, **updates):
+    # Helper to update state and data to user_id sessions
+    sessions[user_id]["state"] = next_state
+    sessions[user_id]["data"].update(updates)
+
+# ============= DB Management ===========================
+DATABASE_URL = "database.json"
+
+def write_to_db(data: dict):
+    with open(DATABASE_URL, "w", encoding='utf-8') as db:
+        json.dump(data, db, indent=4)
+
+def read_from_db():
+    with open(DATABASE_URL, "r", encoding='utf-8') as db:
+        data = json.load(db)
+    return data
+
+def init_db():
+    if not Path(DATABASE_URL).exists():
+        bus_stops_data = fetch_all_bus_stops()
+        write_to_db(
+            data = {"bus_stops": bus_stops_data}
+        )
 
 # Telegram stuffs ===========
 def get_updates(offset=None):
