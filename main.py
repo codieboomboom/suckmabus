@@ -24,27 +24,27 @@ class State(Enum):
 # ============== Sessions Management =====================
 sessions : dict[int] = {}
 
-def get_session(user_id: int) -> dict:
+def get_session(chat_id: int) -> dict:
     # Get session-specific data for the user identified
-    # by user_id
-    if user_id not in sessions:
-        sessions[user_id] = {
+    # by chat_id
+    if chat_id not in sessions:
+        sessions[chat_id] = {
             "state": State.IDLE,
             "data": {}
         }
-    return sessions[user_id]
+    return sessions[chat_id]
 
-def reset_session(user_id: int):
-    # Reset the user_id session state back to IDLE
-    sessions[user_id] = {
+def reset_session(chat_id: int):
+    # Reset the chat_id session state back to IDLE
+    sessions[chat_id] = {
         "state": State.IDLE,
         "data": {}
     }
 
-def update_state_and_data(user_id: int, next_state: State, **updates):
-    # Helper to update state and data to user_id sessions
-    sessions[user_id]["state"] = next_state
-    sessions[user_id]["data"].update(updates)
+def update_state_and_data(chat_id: int, next_state: State, **updates):
+    # Helper to update state and data to chat_id sessions
+    sessions[chat_id]["state"] = next_state
+    sessions[chat_id]["data"].update(updates)
 
 # ============= DB Management ===========================
 DATABASE_URL = "database.json"
