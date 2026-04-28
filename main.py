@@ -85,51 +85,73 @@ def get_updates(offset=None):
     return resp.json()
 
 
-def send_message(chat_id, text):
+def send_message(chat_id, text, **kwargs):
     """Send a reply back to user"""
-    json_message_to_send = {
+    msg = {
         "chat_id": chat_id,
         "text": text
     }
-    requests.post(url=f"{TELEGRAM_BOT_BASEURL}/sendMessage", json=json_message_to_send)
+    if kwargs:
+        msg.update(kwargs)
+    requests.post(url=f"{TELEGRAM_BOT_BASEURL}/sendMessage", json=msg)
+
+def parse_command(text: str):
+    # Parse and return the name of command and arguments
+    # if text is not command, return None and an empty argument list
+    if not text.startswith("/") and len(text) > 1:
+        return (None, [])
+    
+    command_and_args = text[1:].split()
+
+    return command_and_args[0], command_and_args[1:]
+
+def handle_callback_query(callback_query):
+    print("[handle_callback_query")
+
+def handle_message(message):
+    print("[handle_message]")
+    chat_id = message["chat"]["id"]
+    text = message.get("text", "")   # could be a sticker/photo with no text
+
+    if not chat_id:
+        raise ValueError("chat_id must be present in message type")
+
+    command, args = parse_command(text)
+
+    if command == "help":
+        # Display help message
+        send_message(chat_id, "Hi, I can help you with: \n"
+            "/reg - Register a bus stop\n"
+            "/dereg - Remove a bus stop\n"
+            "/modify - Edit bus stop information\n"
+            "/check - Check arrival timings"
+        )
+    elif command == "cancel":
+        # drop whatever been doing, reset session of the chat
+        reset_session(chat_id)
+    curr_session = get_session(chat_id)
+
 
 def handle_update(update):
     """
     This is where you decide what to do with each incoming message.
     We pull out the fields we care about and dispatch to handlers.
     """
-    # Safety: not every update contains a message (could be edited_message etc.)
-    message = update.get("message")
-    if not message:
-        return
+    update_id = update.get("update_id")
+    print(f"[handle_update] Received and handling update id:{update_id}")
 
-    chat_id = message["chat"]["id"]
-    text = message.get("text", "")   # could be a sticker/photo with no text
-
-    print(f"Received: '{text}' from chat_id={chat_id}")
-
-    """IDLE state is where the bot start off, signifying waiting for a command from user.
-    Some commands may be multi-stage and must return back into BOT_STATE_IDLE once it
-    finish it flow"""
-
-    # Parse the command (first word) and arguments (rest)
-    parts = text.strip().split()
-    if not parts:
-        return
-
-    command = parts[0].lower()
-
-    if command == "/start":
-        send_message(chat_id, "Hello! I'm your bus bot. Try /help")
-
-    elif command == "/help":
-        send_message(chat_id,
-            "/reg - Register a bus stop\n"
-            "/dereg - Remove a bus stop\n"
-            "/modify - Edit bus stop information\n"
-            "/check - Check arrival timings"
-        )
-
+    # Check type of update and handle
+    if update.get("callback_query"):
+        # Handle callback query
+        callback_query = update.get("callback_query")
+        handle_callback_query(callback_query)
+    elif update.get("message"):
+        # Handle message
+        msg = update.get("message")
+        handle_message(msg)
+    else:
+        # an unimplemented update
+        print("[handle_update] Received an update that is not callback_query nor message")
 
 def fetch_all_bus_stops():
     """
@@ -157,19 +179,16 @@ def fetch_all_bus_stops():
     return bus_stops_dict
 
 
-
 def run():
-
+    init_db()
     offset = None
     print("Bot is running...")
 
     while True:
         result = get_updates(offset)
-        print(result)
         updates = result.get("result", [])
 
         for update in updates:
-            print(update)
             handle_update(update)
             offset = update["update_id"] + 1        
 
