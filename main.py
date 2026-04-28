@@ -67,10 +67,12 @@ def init_db():
 
 # Telegram stuffs ===========
 def get_updates(offset=None):
-    """Get updates from user"""
+    """Get updates from Telegram server via long polling"""
+    # Long polling
+    # only interested in "message" or "callback_query"
     params = {
         "timeout": 30, # long polling
-        "allowed_updates": ["message"] # TODO: Adjust here cuz not always will be purely message
+        "allowed_updates": ["message", "callback_query"]
     }
     if offset:
         params["offset"] = offset
