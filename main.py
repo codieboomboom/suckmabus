@@ -32,6 +32,7 @@ def get_session(chat_id: int) -> dict:
             "state": State.IDLE,
             "data": {}
         }
+        print(f"[get_session] Create a new session entry for chat_id {chat_id} as not existed previously")
     return sessions[chat_id]
 
 def reset_session(chat_id: int):
@@ -40,11 +41,14 @@ def reset_session(chat_id: int):
         "state": State.IDLE,
         "data": {}
     }
+    print(f"[reset_session] Session for chat_id {chat_id} has been reset!")
 
 def update_state_and_data(chat_id: int, next_state: State, **updates):
     # Helper to update state and data to chat_id sessions
+    # TODO: What if no state changes?
     sessions[chat_id]["state"] = next_state
     sessions[chat_id]["data"].update(updates)
+    print(f"[update_state_and_data] Updated to State: {next_state} and Data: {updates}")
 
 # ============= DB Management ===========================
 DATABASE_URL = "database.json"
@@ -103,7 +107,7 @@ def parse_command(text: str):
     
     command_and_args = text[1:].split()
 
-    return command_and_args[0], command_and_args[1:]
+    return (command_and_args[0], command_and_args[1:])
 
 def handle_callback_query(callback_query):
     print("[handle_callback_query")
@@ -159,6 +163,8 @@ def fetch_all_bus_stops():
     where key is the bus stop number and the value is a dictionary of key-value
     pairs representing information of the bus stops
     """
+    #TODO: add Skip params here so we can init a full db of all bus stop
+    # Currently, only first 500 bus stops are included
     url = f"{LTA_BASEURL}/BusStops"
     headers = {
         "accountKey": LTA_TOKEN
@@ -171,6 +177,7 @@ def fetch_all_bus_stops():
         return {}
 
     bus_stop_lists = json_result["value"]
+    print(bus_stop_lists)
     bus_stops_dict = {}
 
     for bus_stop_entry in bus_stop_lists:
