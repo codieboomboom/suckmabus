@@ -130,10 +130,65 @@ def handle_message(message):
             "/modify - Edit bus stop information\n"
             "/check - Check arrival timings"
         )
+        return
+    elif command == "start":
+        # TODO: Print welcome message
+        welcome_msg = """Hello, I am sucky-sucky 🚌. I can help track when is your next bus. Please /reg a bus stop first before /check your bus timing. More information using /help"""
+        send_message(chat_id, welcome_msg)
+        reset_session(chat_id)
+        return
     elif command == "cancel":
         # drop whatever been doing, reset session of the chat
+        cancel_msg = "Cancelled current command! Let's try again"
+        send_message(chat_id, cancel_msg)
         reset_session(chat_id)
+        return
+
+    # Handle depending on which chat_id we are working with
+    # To allow multiple user
     curr_session = get_session(chat_id)
+    state = curr_session["state"]
+    data = curr_session["data"] 
+
+    if state == State.IDLE and command == "reg":
+        reply_text = "Please provide a valid bus stop number to register"
+        send_message(chat_id, reply_text)
+        update_state_and_data(chat_id, next_state=State.REGISTER_AWAITING_BUS_STOP_NUM)
+        return
+        
+    elif state == State.IDLE and command == "check":
+        pass
+    elif state == State.IDLE and command == "modify":
+        pass
+    elif state == State.IDLE and command == "unreg":
+        pass
+    elif state == State.REGISTER_AWAITING_BUS_STOP_NUM:
+        if command:
+            send_message(chat_id, "Please enter a bus stop number only 🥺. Try again!")
+        else:
+            bus_stop_num = text.strip()
+            print(f"[handle_message] Received bus stop number: {bus_stop_num}")
+            db_data = read_from_db() 
+            if bus_stop_num not in db_data["bus_stops"]:
+                send_message(chat_id, "Sorry, seems like your bus stop number not exist 🥺. Try again!")
+            else:
+                bus_stop_description = db_data["bus_stops"][bus_stop_num]["Description"]
+                bus_stop_road_name = db_data["bus_stops"][bus_stop_num]["RoadName"]
+                reply_msg = f"""Is this the bus stop you wanted to register?
+
+{bus_stop_description}
+on {bus_stop_road_name}
+                """
+                #TODO: Add inline keyboard
+                send_message(chat_id, reply_msg)
+                data = {"bus_stop_num": bus_stop_num}
+                update_state_and_data(chat_id, next_state=State.REGISTER_AWAITING_CONFIRM, data=data)
+
+            
+    else:
+        reset_session(chat_id)
+        send_message(chat_id, "🥺 Sorry I don't understand you! Please refer to /help and try again!")
+
 
 
 def handle_update(update):
