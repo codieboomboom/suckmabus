@@ -11,6 +11,7 @@ TELEGRAM_BOT_BASEURL=f"https://api.telegram.org/bot{TELEGRAM_BOT_TOKEN}"
 LTA_TOKEN=environ.get("LTA_DATAMALL_TOKEN")
 LTA_BASEURL="https://datamall2.mytransport.sg/ltaodataservice"
 
+LTA_API_SKIP_OFFSET = 500 # max number of record fetched per call to API
 # ============ States ===========================
 
 class State(Enum):
@@ -218,24 +219,31 @@ def fetch_all_bus_stops():
     where key is the bus stop number and the value is a dictionary of key-value
     pairs representing information of the bus stops
     """
-    #TODO: add Skip params here so we can init a full db of all bus stop
-    # Currently, only first 500 bus stops are included
-    url = f"{LTA_BASEURL}/BusStops"
     headers = {
         "accountKey": LTA_TOKEN
     }
-    resp = requests.get(url, headers=headers)
+    bus_stops = []
+    skip_by = 0 # Number of entry to skip
+    # Based on https://datamall.lta.gov.sg/content/dam/datamall/datasets/LTA_DataMall_API_User_Guide.pdf
+    # Currently, each API call only returns max LTA_API_SKIP_OFFSET
+    # Here we needs to handle them until all entries are fetched
+    while True:
+        url = f"{LTA_BASEURL}/BusStops?$skip={skip_by}"
+        resp = requests.get(url, headers=headers)
+        json_result = resp.json()
 
-    json_result = resp.json()
+        if "value" not in json_result or not json_result["value"]:
+            break
 
-    if "value" not in json_result or not json_result["value"]:
-        return {}
+        bus_stops.extend(json_result["value"])
+        if len(json_result["value"]) < LTA_API_SKIP_OFFSET:
+            break
 
-    bus_stop_lists = json_result["value"]
-    print(bus_stop_lists)
+        skip_by += LTA_API_SKIP_OFFSET 
+
+    # Need to be key-value format for easier storage into file database
     bus_stops_dict = {}
-
-    for bus_stop_entry in bus_stop_lists:
+    for bus_stop_entry in bus_stops:
         bus_stops_dict[bus_stop_entry["BusStopCode"]] = bus_stop_entry
 
     return bus_stops_dict
