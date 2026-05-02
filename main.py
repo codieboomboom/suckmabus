@@ -180,8 +180,14 @@ def handle_message(message):
 {bus_stop_description}
 on {bus_stop_road_name}
                 """
-                #TODO: Add inline keyboard
-                send_message(chat_id, reply_msg)
+                confirm_keyboard_markup = {
+                    "inline_keyboard": [
+                        [{"text": "Yes", "callback_data": "reg:bus_stop:confirm:yes"},
+                         {"text": "No", "callback_data": "reg:bus_stop:confirm:no"}]
+                    ]
+                }
+                kwargs = {"reply_markup": confirm_keyboard_markup}
+                send_message(chat_id, reply_msg, **kwargs)
                 data = {"bus_stop_num": bus_stop_num}
                 update_state_and_data(chat_id, next_state=State.REGISTER_AWAITING_CONFIRM, data=data)
 
