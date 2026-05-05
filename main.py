@@ -110,8 +110,40 @@ def parse_command(text: str):
 
     return (command_and_args[0], command_and_args[1:])
 
+def answer_callback_query(callback_query_id, **kwargs):
+    payload = {
+        "callback_query_id": callback_query_id         
+    }
+    if kwargs:
+        payload.update(kwargs)
+    request.post(url=f"{TELEGRAM_BOT_BASEURL}/answerCallbackQuery", json=payload)
+
 def handle_callback_query(callback_query):
     print("[handle_callback_query")
+    # Answer the callback query first
+    callback_query_id = callback_query["id"]
+    if not callback_query_id:
+        raise ValueError("callback_query_id must be present inside a callback query")
+    
+    answer_callback_query(callback_query_id)
+
+    # Process the callback query from button clicks
+    callback_data = callback_query["data"]
+    if not callback_data:
+        return
+
+    command_in_process, tbc_resource_type, chat_id, verdict = callback_data.split(";")
+
+    # Based on session data and the callback_query information
+    # Function the FSM
+    curr_session = get_session(chat_id)
+    curr_state = curr_session["state"]
+    curr_session_data = curr_session["data"] 
+
+    if curr_state == State.REGISTER_AWAITING_CONFIRM and command_in_process == "reg":
+        if tbc_resource_type == "bus_stop" and verdict == "yes":
+            pending_bus_stop_num = curr_session_data[chat_id]["data"]["bus_stop_num"]
+            # TODO: write to persistent layer the new bus stop number
 
 def handle_message(message):
     print("[handle_message]")
