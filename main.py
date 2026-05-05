@@ -148,22 +148,22 @@ def handle_message(message):
     # Handle depending on which chat_id we are working with
     # To allow multiple user
     curr_session = get_session(chat_id)
-    state = curr_session["state"]
-    data = curr_session["data"] 
+    curr_state = curr_session["state"]
+    curr_session_data = curr_session["data"] 
 
-    if state == State.IDLE and command == "reg":
+    if curr_state == State.IDLE and command == "reg":
         reply_text = "Please provide a valid bus stop number to register"
         send_message(chat_id, reply_text)
         update_state_and_data(chat_id, next_state=State.REGISTER_AWAITING_BUS_STOP_NUM)
         return
         
-    elif state == State.IDLE and command == "check":
+    elif curr_state == State.IDLE and command == "check":
         pass
-    elif state == State.IDLE and command == "modify":
+    elif curr_state == State.IDLE and command == "modify":
         pass
-    elif state == State.IDLE and command == "unreg":
+    elif curr_state == State.IDLE and command == "unreg":
         pass
-    elif state == State.REGISTER_AWAITING_BUS_STOP_NUM:
+    elif curr_state == State.REGISTER_AWAITING_BUS_STOP_NUM:
         if command:
             send_message(chat_id, "Please enter a bus stop number only 🥺. Try again!")
         else:
@@ -171,7 +171,7 @@ def handle_message(message):
             print(f"[handle_message] Received bus stop number: {bus_stop_num}")
             db_data = read_from_db() 
             if bus_stop_num not in db_data["bus_stops"]:
-                send_message(chat_id, "Sorry, seems like your bus stop number not exist 🥺. Try again!")
+                send_message(chat_id, "Sorry, seems like your bus stop number not exist 🥺. Try again or /cancel to abort registration")
             else:
                 bus_stop_description = db_data["bus_stops"][bus_stop_num]["Description"]
                 bus_stop_road_name = db_data["bus_stops"][bus_stop_num]["RoadName"]
@@ -182,14 +182,15 @@ on {bus_stop_road_name}
                 """
                 confirm_keyboard_markup = {
                     "inline_keyboard": [
-                        [{"text": "Yes", "callback_data": "reg:bus_stop:confirm:yes"},
-                         {"text": "No", "callback_data": "reg:bus_stop:confirm:no"}]
+                        [{"text": "Yes", "callback_data": f"reg:bus_stop:{chat_id}:yes"},
+                         {"text": "No", "callback_data": f"reg:bus_stop:{chat_id}:no"}]
                     ]
                 }
                 kwargs = {"reply_markup": confirm_keyboard_markup}
                 send_message(chat_id, reply_msg, **kwargs)
-                data = {"bus_stop_num": bus_stop_num}
-                update_state_and_data(chat_id, next_state=State.REGISTER_AWAITING_CONFIRM, data=data)
+                # Store temporarily the bus_stop_num and move to wait for user confirm
+                ss_data_to_store  = {"bus_stop_num": bus_stop_num}
+                update_state_and_data(chat_id, next_state=State.REGISTER_AWAITING_CONFIRM, data=ss_data_to_store)
 
             
     else:
