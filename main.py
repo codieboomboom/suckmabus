@@ -116,7 +116,7 @@ def answer_callback_query(callback_query_id, **kwargs):
     }
     if kwargs:
         payload.update(kwargs)
-    request.post(url=f"{TELEGRAM_BOT_BASEURL}/answerCallbackQuery", json=payload)
+    requests.post(url=f"{TELEGRAM_BOT_BASEURL}/answerCallbackQuery", json=payload)
 
 def handle_callback_query(callback_query):
     print("[handle_callback_query")
