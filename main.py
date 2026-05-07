@@ -67,7 +67,10 @@ def init_db():
     if not Path(DATABASE_URL).exists():
         bus_stops_data = fetch_all_bus_stops()
         write_to_db(
-            data = {"bus_stops": bus_stops_data}
+            data = {
+                "bus_stops": bus_stops_data,
+                "registered": {}
+            }
         )
 
 # Telegram stuffs ===========
