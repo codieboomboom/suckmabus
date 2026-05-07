@@ -155,14 +155,20 @@ def handle_callback_query(callback_query):
             print("[handle_callback_query][confirm bus stop yes]")
             pending_bus_stop_num = curr_session_data["bus_stop_num"]
             db_data = read_from_db()
+            # Create bus stop entry for this user: stop number, road name, description
+            bus_stop_entry = {
+                "bus_stop_num": pending_bus_stop_num,
+                "road_name": db_data["bus_stops"][pending_bus_stop_num]["RoadName"],
+                "desc": db_data["bus_stops"][pending_bus_stop_num]["Description"]
+            }
             if "registered" not in db_data:
                 db_data["registered"] = {}
             if chat_id not in db_data["registered"]:
-                db_data["registered"][chat_id] = []
+                db_data["registered"][chat_id] = {}
             # TODO: if we ever extend to have alias of bus stop,
             # this part need to be handled as well (store in cache still, move
             # to next stage
-            db_data["registered"][chat_id].append(pending_bus_stop_num)
+            db_data["registered"][chat_id][pending_bus_stop_no] = bus_stop_entry
             write_to_db(db_data)
 
             text = f"Registered bus stop with {pending_bus_stop_num}"
@@ -194,7 +200,6 @@ def handle_message(message):
         )
         return
     elif command == "start":
-        # TODO: Print welcome message
         welcome_msg = """Hello, I am sucky-sucky 🚌. I can help track when is your next bus. Please /reg a bus stop first before /check your bus timing. More information using /help"""
         send_message(chat_id, welcome_msg)
         reset_session(chat_id)
