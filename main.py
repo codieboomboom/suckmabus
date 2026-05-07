@@ -129,13 +129,19 @@ def handle_callback_query(callback_query):
         raise ValueError("callback_query_id must be present inside a callback query")
     
     answer_callback_query(callback_query_id)
+    print(f"[handle_callback_query] Answered to callback_query with id {callback_query_id}")
 
     # Process the callback query from button clicks
     callback_data = callback_query["data"]
     if not callback_data:
         return
 
-    command_in_process, tbc_resource_type, chat_id, verdict = callback_data.split(";")
+    command_in_process, tbc_resource_type, chat_id, verdict = callback_data.split(":")
+    print(f"[handle_callback_query] Callback data parsing: {command_in_process} {tbc_resource_type} {chat_id} {verdict}")
+
+    # TODO: Does Telegram API works with integer chat_id only? Here need to
+    # convert back to integer as the way button callback make it a text
+    chat_id = int(chat_id)
 
     # Based on session data and the callback_query information
     # Function the FSM
@@ -145,8 +151,27 @@ def handle_callback_query(callback_query):
 
     if curr_state == State.REGISTER_AWAITING_CONFIRM and command_in_process == "reg":
         if tbc_resource_type == "bus_stop" and verdict == "yes":
-            pending_bus_stop_num = curr_session_data[chat_id]["data"]["bus_stop_num"]
-            # TODO: write to persistent layer the new bus stop number
+            print("[handle_callback_query][confirm bus stop yes]")
+            pending_bus_stop_num = curr_session_data["bus_stop_num"]
+            db_data = read_from_db()
+            if "registered" not in db_data:
+                db_data["registered"] = {}
+            if chat_id not in db_data["registered"]:
+                db_data["registered"][chat_id] = []
+            # TODO: if we ever extend to have alias of bus stop,
+            # this part need to be handled as well (store in cache still, move
+            # to next stage
+            db_data["registered"][chat_id].append(pending_bus_stop_num)
+            write_to_db(db_data)
+
+            text = f"Registered bus stop with {pending_bus_stop_num}"
+            send_message(chat_id, text)
+            reset_session(chat_id)
+        elif tbc_resource_type == "bus_stop" and verdict == "no":
+            print("[handle_callback_query][confirm bus stop no]")
+            text = f"Please provide another bus stop number or /cancel"
+            send_message(chat_id, text)
+            update_state_and_data(chat_id, State.REGISTER_AWAITING_BUS_STOP_NUM)
 
 def handle_message(message):
     print("[handle_message]")
@@ -199,15 +224,20 @@ def handle_message(message):
     elif curr_state == State.IDLE and command == "unreg":
         pass
     elif curr_state == State.REGISTER_AWAITING_BUS_STOP_NUM:
+        # FSM handling when receiving an input for bus stop number
         if command:
             send_message(chat_id, "Please enter a bus stop number only 🥺. Try again!")
         else:
+            # Validate if the bus stop exist at all
             bus_stop_num = text.strip()
             print(f"[handle_message] Received bus stop number: {bus_stop_num}")
             db_data = read_from_db() 
             if bus_stop_num not in db_data["bus_stops"]:
                 send_message(chat_id, "Sorry, seems like your bus stop number not exist 🥺. Try again or /cancel to abort registration")
             else:
+                # When bus stop does exists, ready to move to next stage where
+                # users may confirm whether the information retrieved by us
+                # regarding their bus stop is accurated
                 bus_stop_description = db_data["bus_stops"][bus_stop_num]["Description"]
                 bus_stop_road_name = db_data["bus_stops"][bus_stop_num]["RoadName"]
                 reply_msg = f"""Is this the bus stop you wanted to register?
@@ -215,6 +245,8 @@ def handle_message(message):
 {bus_stop_description}
 on {bus_stop_road_name}
                 """
+                # Markup keyboard on telegram chat UI showing option to above
+                # question.
                 confirm_keyboard_markup = {
                     "inline_keyboard": [
                         [{"text": "Yes", "callback_data": f"reg:bus_stop:{chat_id}:yes"},
