@@ -257,8 +257,7 @@ on {bus_stop_road_name}
                 send_message(chat_id, reply_msg, **kwargs)
                 # Store temporarily the bus_stop_num and move to wait for user confirm
                 ss_data_to_store  = {"bus_stop_num": bus_stop_num}
-                update_state_and_data(chat_id, next_state=State.REGISTER_AWAITING_CONFIRM, data=ss_data_to_store)
-
+                update_state_and_data(chat_id, next_state=State.REGISTER_AWAITING_CONFIRM, **ss_data_to_store)
             
     else:
         reset_session(chat_id)
