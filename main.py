@@ -50,6 +50,7 @@ def update_state_and_data(chat_id: int, next_state: State, **updates):
     sessions[chat_id]["state"] = next_state
     sessions[chat_id]["data"].update(updates)
     print(f"[update_state_and_data] Updated to State: {next_state} and Data: {updates}")
+    print(f"[update_state_and_data] Sessions view {sessions}")
 
 # ============= DB Management ===========================
 DATABASE_URL = "database.json"
