@@ -185,6 +185,19 @@ def handle_callback_query(callback_query):
             text = "Please provide another bus stop number or /cancel"
             send_message(chat_id, text)
             update_state_and_data(chat_id, State.REGISTER_AWAITING_BUS_STOP_NUM)
+    elif curr_state == State.CHECK_AWAITING_SELECTION and command_in_process == "check":
+        print(
+            f"[handle_callback_query] Processing callback for /{command_in_process} at stage {curr_state}"
+        )
+        selected_bus_stop_num = callback_data_fields[3]
+        bus_num_to_arrivals_timestamp_mapping = fetch_bus_stop_arrival(
+            selected_bus_stop_num
+        )
+        # TODO: Parse time and calculate time to arrival
+        # TODO: set some kind of threshold to make it as bus is arriving (say less than 1 min 30 sec)
+        # TODO: What if bus time arrival diff is -ve?
+        print(bus_num_to_arrivals_timestamp_mapping)
+        reset_session(chat_id)
 
 
 def handle_message(message):
@@ -350,6 +363,34 @@ def handle_update(update):
         print(
             "[handle_update] Received an update that is not callback_query nor message"
         )
+
+
+def fetch_bus_stop_arrival(bus_stop_num):
+    """
+    Query the LTA database using the bus_stop_num for a list of arriving buses
+    """
+    headers = {"accountKey": LTA_TOKEN}
+    url = f"{LTA_BASEURL}/v3/BusArrival?BusStopCode={bus_stop_num}"
+    resp = requests.get(
+        url, headers=headers
+    )  # TODO: handle the case where nothing is return, as noted by the datamall api
+    json_result = resp.json()
+
+    if "Services" not in json_result or not json_result["Services"]:
+        return []
+
+    bus_arrivals = {}
+    for bus_service_entry in json_result["Services"]:
+        bus_num = bus_service_entry["ServiceNo"]
+        arrival_timestamp = []
+        for next_bus_key in ["NextBus", "NextBus2", "NextBus3"]:
+            if bus_service_entry[next_bus_key]["EstimatedArrival"]:
+                arrival_timestamp.append(
+                    bus_service_entry[next_bus_key]["EstimatedArrival"]
+                )
+        bus_arrivals[bus_num] = arrival_timestamp
+
+    return bus_arrivals
 
 
 def fetch_all_bus_stops():
