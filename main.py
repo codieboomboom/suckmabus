@@ -138,15 +138,11 @@ def handle_callback_query(callback_query):
     if not callback_data:
         return
 
-    command_in_process, tbc_resource_type, chat_id, verdict = callback_data.split(":")
-    print(
-        f"[handle_callback_query] Callback data parsing: {command_in_process} {tbc_resource_type} {chat_id} {verdict}"
-    )
-
+    callback_data_fields = callback_data.split(":")
+    command_in_process = callback_data_fields[0]
     # TODO: Does Telegram API works with integer chat_id only? Here need to
     # convert back to integer as the way button callback make it a text
-    chat_id = int(chat_id)
-
+    chat_id = int(callback_data_fields[1])  # protocol defined command:chat_id:blah:blah
     # Based on session data and the callback_query information
     # Function the FSM
     curr_session = get_session(chat_id)
@@ -154,10 +150,17 @@ def handle_callback_query(callback_query):
     curr_session_data = curr_session["data"]
 
     if curr_state == State.REGISTER_AWAITING_CONFIRM and command_in_process == "reg":
+        print(
+            f"[handle_callback_query] Processing callback for /{command_in_process} at stage {curr_state}"
+        )
+        tbc_resource_type = callback_data_fields[2]
+        verdict = callback_data_fields[3]
+
         if tbc_resource_type == "bus_stop" and verdict == "yes":
             print("[handle_callback_query][confirm bus stop yes]")
             pending_bus_stop_num = curr_session_data["bus_stop_num"]
             db_data = read_from_db()
+            db_chat_id = str(chat_id)  # for stupid reasons...
             # Create bus stop entry for this user: stop number, road name, description
             bus_stop_entry = {
                 "bus_stop_num": pending_bus_stop_num,
@@ -166,12 +169,12 @@ def handle_callback_query(callback_query):
             }
             if "registered" not in db_data:
                 db_data["registered"] = {}
-            if chat_id not in db_data["registered"]:
-                db_data["registered"][chat_id] = {}
+            if db_chat_id not in db_data["registered"]:
+                db_data["registered"][db_chat_id] = {}
             # TODO: if we ever extend to have alias of bus stop,
             # this part need to be handled as well (store in cache still, move
             # to next stage
-            db_data["registered"][chat_id][pending_bus_stop_no] = bus_stop_entry
+            db_data["registered"][db_chat_id][pending_bus_stop_num] = bus_stop_entry
             write_to_db(db_data)
 
             text = f"Registered bus stop with {pending_bus_stop_num}"
@@ -221,31 +224,65 @@ def handle_message(message):
     # To allow multiple user
     curr_session = get_session(chat_id)
     curr_state = curr_session["state"]
-    curr_session_data = curr_session["data"] 
+    curr_session_data = curr_session["data"]
 
     if curr_state == State.IDLE and command == "reg":
         reply_text = "Please provide a valid bus stop number to register"
         send_message(chat_id, reply_text)
         update_state_and_data(chat_id, next_state=State.REGISTER_AWAITING_BUS_STOP_NUM)
         return
-        
+
     elif curr_state == State.IDLE and command == "check":
-        pass
+        # Ensure that there are bus stop registered first
+        db_data = read_from_db()
+        db_chat_id = str(chat_id)
+        if (
+            "registered" not in db_data
+            or db_chat_id not in db_data["registered"]
+            or not db_data["registered"][db_chat_id]
+        ):
+            reply_text = (
+                "You don't seems to have any saved bus stop. Please /reg first!"
+            )
+            send_message(chat_id, reply_text)
+            reset_session(chat_id)
+            return
+        # Prepare list of bus stops as buttons to be selected
+        reply_text = "Please select a bus stop to check timing:"
+        rows_on_inline_keyboard = []
+        for bus_stop_num, bus_stop_entry in db_data["registered"][db_chat_id].items():
+            keyboard_entry_as_row = [
+                {
+                    "text": f"{bus_stop_entry['desc']} ({bus_stop_entry['road_name']})",
+                    "callback_data": f"check:{chat_id}:bus_arrival:{bus_stop_num}",
+                }
+            ]
+            rows_on_inline_keyboard.append(keyboard_entry_as_row)
+        selection_keyboard_markup = {"inline_keyboard": rows_on_inline_keyboard}
+        # Send inline keyboard with selection of stored bus stop
+        send_message(chat_id, reply_text, reply_markup=selection_keyboard_markup)
+        update_state_and_data(chat_id, State.CHECK_AWAITING_SELECTION)
+
     elif curr_state == State.IDLE and command == "modify":
+        # TODO: Implement
         pass
     elif curr_state == State.IDLE and command == "unreg":
+        # TODO: Implement
         pass
     elif curr_state == State.REGISTER_AWAITING_BUS_STOP_NUM:
-        # FSM handling when receiving an input for bus stop number
+        # Handle arriving bus stop number for registration
         if command:
             send_message(chat_id, "Please enter a bus stop number only 🥺. Try again!")
         else:
             # Validate if the bus stop exist at all
             bus_stop_num = text.strip()
             print(f"[handle_message] Received bus stop number: {bus_stop_num}")
-            db_data = read_from_db() 
+            db_data = read_from_db()
             if bus_stop_num not in db_data["bus_stops"]:
-                send_message(chat_id, "Sorry, seems like your bus stop number not exist 🥺. Try again or /cancel to abort registration")
+                send_message(
+                    chat_id,
+                    "Sorry, seems like your bus stop number not exist 🥺. Try again or /cancel to abort registration",
+                )
             else:
                 # When bus stop does exists, ready to move to next stage where
                 # users may confirm whether the information retrieved by us
@@ -264,11 +301,11 @@ on {bus_stop_road_name}
                         [
                             {
                                 "text": "Yes",
-                                "callback_data": f"reg:bus_stop:{chat_id}:yes",
+                                "callback_data": f"reg:{chat_id}:bus_stop:yes",
                             },
                             {
                                 "text": "No",
-                                "callback_data": f"reg:bus_stop:{chat_id}:no",
+                                "callback_data": f"reg:{chat_id}:bus_stop:no",
                             },
                         ]
                     ]
