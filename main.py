@@ -299,14 +299,20 @@ def handle_message(message):
         if command:
             send_message(chat_id, "Please enter a bus stop number only 🥺. Try again!")
         else:
-            # Validate if the bus stop exist at all
+            # Validate if the bus stop valid at all
             bus_stop_num = text.strip()
             print(f"[handle_message] Received bus stop number: {bus_stop_num}")
             db_data = read_from_db()
+            db_chat_id = str(chat_id)
             if bus_stop_num not in db_data["bus_stops"]:
                 send_message(
                     chat_id,
                     "Sorry, seems like your bus stop number not exist 🥺. Try again or /cancel to abort registration",
+                )
+            elif bus_stop_num in db_data["registered"][db_chat_id]:
+                send_message(
+                    chat_id,
+                    "You have registered this bus stop. Try a different one or /cancel to abort",
                 )
             else:
                 # When bus stop does exists, ready to move to next stage where
