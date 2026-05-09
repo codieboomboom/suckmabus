@@ -3,6 +3,7 @@ from dotenv import load_dotenv
 from os import environ
 from pathlib import Path
 from enum import Enum, auto
+from datetime import datetime, timezone, timedelta
 import json
 
 load_dotenv()
@@ -193,10 +194,12 @@ def handle_callback_query(callback_query):
         bus_num_to_arrivals_timestamp_mapping = fetch_bus_stop_arrival(
             selected_bus_stop_num
         )
-        # TODO: Parse time and calculate time to arrival
-        # TODO: set some kind of threshold to make it as bus is arriving (say less than 1 min 30 sec)
-        # TODO: What if bus time arrival diff is -ve?
-        print(bus_num_to_arrivals_timestamp_mapping)
+        for bus_num, bus_arrival_entry in bus_num_to_arrivals_timestamp_mapping.items():
+            # TODO: might need refactor if bus_arrival_entry is no longer list
+            timestamps_iso8601 = bus_arrival_entry
+            minutes = calc_minutes_to_arrival(timestamps_iso8601)
+            # TODO: What if bus time arrival diff is -ve?
+            print(f"bus {bus_num} has following next buses: {minutes}")
         reset_session(chat_id)
 
 
@@ -365,6 +368,28 @@ def handle_update(update):
         )
 
 
+def calc_minutes_to_arrival(timestamp_in_iso8601):
+    """
+    Calculate the minutes for bus to arrivals, in minutes from the ISO8601
+    timestamps given. Return a list of integer with similar dimesion as the
+    input list where each element denotes minutes remaining until bus arriving
+    """
+    if not timestamp_in_iso8601:
+        return []
+
+    # current time in Singapore time zone
+    sgtz = timezone(timedelta(hours=8))
+    curr_time = datetime.now(sgtz)
+
+    arrivals_minutes = []
+    for arrival_timestamp_iso8601 in timestamp_in_iso8601:
+        # Convert to datetime
+        arrival_dt = datetime.fromisoformat(arrival_timestamp_iso8601)
+        arrivals_minutes.append(int((arrival_dt - curr_time).total_seconds() / 60))
+
+    return arrivals_minutes
+
+
 def fetch_bus_stop_arrival(bus_stop_num):
     """
     Query the LTA database using the bus_stop_num for a list of arriving buses
@@ -384,6 +409,8 @@ def fetch_bus_stop_arrival(bus_stop_num):
         bus_num = bus_service_entry["ServiceNo"]
         arrival_timestamp = []
         for next_bus_key in ["NextBus", "NextBus2", "NextBus3"]:
+            # TODO: Here we only store the timestamp for simplicity sake
+            # What can our application extend in the future?
             if bus_service_entry[next_bus_key]["EstimatedArrival"]:
                 arrival_timestamp.append(
                     bus_service_entry[next_bus_key]["EstimatedArrival"]
