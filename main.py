@@ -194,12 +194,21 @@ def handle_callback_query(callback_query):
         bus_num_to_arrivals_timestamp_mapping = fetch_bus_stop_arrival(
             selected_bus_stop_num
         )
+        msg_parts = [
+            f"Sure! Here are the arriving buses for bus stop 🚏 {selected_bus_stop_num}:\n"
+        ]
         for bus_num, bus_arrival_entry in bus_num_to_arrivals_timestamp_mapping.items():
             # TODO: might need refactor if bus_arrival_entry is no longer list
             timestamps_iso8601 = bus_arrival_entry
             minutes = calc_minutes_to_arrival(timestamps_iso8601)
             # TODO: What if bus time arrival diff is -ve?
-            print(f"bus {bus_num} has following next buses: {minutes}")
+            print(
+                f"[handle_callback_query][check][stop_numer {selected_bus_stop_num}] bus {bus_num} has following next buses: {minutes}"
+            )
+            bus_arrival_msg = build_bus_arrival_info_string(bus_num, minutes)
+            msg_parts.append(bus_arrival_msg)
+        text = "".join(msg_parts)
+        send_message(chat_id, text)
         reset_session(chat_id)
 
 
@@ -366,6 +375,17 @@ def handle_update(update):
         print(
             "[handle_update] Received an update that is not callback_query nor message"
         )
+
+
+def build_bus_arrival_info_string(bus_num, minutes_to_arrival):
+    result = [f"🚌 {bus_num}: "]
+    for next_arrival_est in minutes_to_arrival:
+        if next_arrival_est < 0:
+            result.append("[✅ ARRIVING] ")
+        else:
+            result.append(f"[{next_arrival_est} MINs] ")
+    result.append("\n")
+    return "".join(result)
 
 
 def calc_minutes_to_arrival(timestamp_in_iso8601):
