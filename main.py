@@ -20,8 +20,8 @@ class State(Enum):
     IDLE = auto()
     REGISTER_AWAITING_BUS_STOP_NUM = auto()
     REGISTER_AWAITING_CONFIRM = auto()
-    DEREGISTER_AWAITING_SELECTION = auto()
-    DEREGISTER_AWAITING_CONFIRM = auto()
+    UNREGISTER_AWAITING_SELECTION = auto()
+    UNREGISTER_AWAITING_CONFIRM = auto()
     CHECK_AWAITING_SELECTION = auto()
 
 
@@ -228,7 +228,7 @@ def handle_message(message):
             chat_id,
             "Hi, I can help you with: \n"
             "/reg - Register a bus stop\n"
-            "/dereg - Remove a bus stop\n"
+            "/unreg - Remove a bus stop\n"
             "/modify - Edit bus stop information\n"
             "/check - Check arrival timings",
         )
@@ -292,8 +292,36 @@ def handle_message(message):
         # TODO: Implement
         pass
     elif curr_state == State.IDLE and command == "unreg":
-        # TODO: Implement
-        pass
+        # Check if there are anything to remove
+        db_data = read_from_db()
+        db_chat_id = str(chat_id)
+        if (
+            "registered" not in db_data
+            or db_chat_id not in db_data["registered"]
+            or not db_data["registered"][db_chat_id]
+        ):
+            reply_text = (
+                "You don't seems to have any saved bus stop to remove. All good"
+            )
+            send_message(chat_id, reply_text)
+            reset_session(chat_id)
+            return
+
+        # Prepare list of bus stops as buttons to be selected
+        reply_text = "Please select a bus stop you wish to remove"
+        rows_on_inline_keyboard = []
+        for bus_stop_num, bus_stop_entry in db_data["registered"][db_chat_id].items():
+            keyboard_entry_as_row = [
+                {
+                    "text": f"{bus_stop_entry['desc']} ({bus_stop_entry['road_name']})",
+                    "callback_data": f"unreg:{chat_id}:bus_stop:{bus_stop_num}",
+                }
+            ]
+            rows_on_inline_keyboard.append(keyboard_entry_as_row)
+        selection_keyboard_markup = {"inline_keyboard": rows_on_inline_keyboard}
+        # Send inline keyboard with selection of stored bus stop
+        send_message(chat_id, reply_text, reply_markup=selection_keyboard_markup)
+        update_state_and_data(chat_id, State.UNREGISTER_AWAITING_SELECTION)
     elif curr_state == State.REGISTER_AWAITING_BUS_STOP_NUM:
         # Handle arriving bus stop number for registration
         if command:
