@@ -5,14 +5,17 @@ from pathlib import Path
 from enum import Enum, auto
 from datetime import datetime, timezone, timedelta
 import json
+from time import sleep
 
 load_dotenv()
 TELEGRAM_BOT_TOKEN = environ.get("TELEGRAM_BOT_TOKEN")
 TELEGRAM_BOT_BASEURL = f"https://api.telegram.org/bot{TELEGRAM_BOT_TOKEN}"
 LTA_TOKEN = environ.get("LTA_DATAMALL_TOKEN")
 LTA_BASEURL = "https://datamall2.mytransport.sg/ltaodataservice"
-
 LTA_API_SKIP_OFFSET = 500  # max number of record fetched per call to API
+
+MAX_DELAY = 60  # for exponential back-off
+MIN_DELAY = 1
 # ============ States ===========================
 
 
@@ -585,14 +588,21 @@ def run():
     init_db()
     offset = None
     print("Bot is running...")
+    try_delay = MIN_DELAY
+    try:
+        while True:
+            result = get_updates(offset)
+            try_delay = MIN_DELAY  # reset back-off
+            updates = result.get("result", [])
 
-    while True:
-        result = get_updates(offset)
-        updates = result.get("result", [])
-
-        for update in updates:
-            handle_update(update)
-            offset = update["update_id"] + 1
+            for update in updates:
+                handle_update(update)
+                offset = update["update_id"] + 1
+    except (requests.exceptions.RequestException, Exception) as e:
+        # Back-off and increment the delay for next round, before retry
+        print(f"Polling error happened: {e}. Retrying in {try_delay} secs...")
+        sleep(try_delay)
+        try_delay = min(try_delay * 2, MAX_DELAY)
 
 
 if __name__ == "__main__":
