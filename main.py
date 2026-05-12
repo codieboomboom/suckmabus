@@ -218,7 +218,7 @@ def handle_callback_query(callback_query):
         print(
             f"[handle_callback_query] Processing callback /{command_in_process} at stage {curr_state}"
         )
-        selected_bus_stop_num = callback_data_fields[3]
+        pending_bus_stop_num = callback_data_fields[3]
         db_data = read_from_db()
 
         bus_stop_entry = {
@@ -251,7 +251,7 @@ def handle_callback_query(callback_query):
         )
     elif (
         curr_state == State.UNREGISTER_AWAITING_CONFIRM
-        and command_in_process == "/unreg"
+        and command_in_process == "unreg"
     ):
         print(
             f"[handle_callback_query] Processing callback for /{command_in_process} at stage {curr_state}"
@@ -272,6 +272,7 @@ def handle_callback_query(callback_query):
                 raise Exception(
                     "Attempt to remove a non-registered bus stop. Something is so wrong..."
                 )
+            write_to_db(db_data)
             print(
                 f"[handle_callback_query][removed bus stop with entry] {removed_entry}"
             )
