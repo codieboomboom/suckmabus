@@ -156,7 +156,7 @@ def handle_callback_query(callback_query):
         )
         tbc_resource_type = callback_data_fields[2]
         verdict = callback_data_fields[3]
-
+        # TODO: what about other option other than yes and no? Handle explicitly
         if tbc_resource_type == "bus_stop" and verdict == "yes":
             print("[handle_callback_query][confirm bus stop yes]")
             pending_bus_stop_num = curr_session_data["bus_stop_num"]
@@ -210,6 +210,78 @@ def handle_callback_query(callback_query):
         text = "".join(msg_parts)
         send_message(chat_id, text)
         reset_session(chat_id)
+    elif (
+        curr_state == State.UNREGISTER_AWAITING_SELECTION
+        and command_in_process == "unreg"
+    ):
+        # TODO: this seems to be a huge chunk of repetitive code
+        print(
+            f"[handle_callback_query] Processing callback /{command_in_process} at stage {curr_state}"
+        )
+        selected_bus_stop_num = callback_data_fields[3]
+        db_data = read_from_db()
+
+        bus_stop_entry = {
+            "bus_stop_num": pending_bus_stop_num,
+            "road_name": db_data["bus_stops"][pending_bus_stop_num]["RoadName"],
+            "desc": db_data["bus_stops"][pending_bus_stop_num]["Description"],
+        }
+
+        text = f"Please confirm the following bus stop to be removed: \n{bus_stop_entry['desc']} on {bus_stop_entry['road_name']}"
+        confirm_keyboard_markup = {
+            "inline_keyboard": [
+                [
+                    {
+                        "text": "Yes",
+                        "callback_data": f"unreg:{chat_id}:bus_stop:yes",
+                    },
+                    {
+                        "text": "No",
+                        "callback_data": f"unreg:{chat_id}:bus_stop:no",
+                    },
+                ]
+            ]
+        }
+        kwargs = {"reply_markup": confirm_keyboard_markup}
+        send_message(chat_id, text, **kwargs)
+        update_state_and_data(
+            chat_id,
+            State.UNREGISTER_AWAITING_CONFIRM,
+            bus_stop_num_to_unreg=pending_bus_stop_num,
+        )
+    elif (
+        curr_state == State.UNREGISTER_AWAITING_CONFIRM
+        and command_in_process == "/unreg"
+    ):
+        print(
+            f"[handle_callback_query] Processing callback for /{command_in_process} at stage {curr_state}"
+        )
+        tbc_resource_type = callback_data_fields[2]
+        verdict = callback_data_fields[3]
+        # TODO: add an else Handle explicitly other option apart from these 2
+        if tbc_resource_type == "bus_stop" and verdict == "yes":
+            print("[handle_callback_query][confirm delete][yes]")
+            db_data = read_from_db()
+            db_chat_id = str(chat_id)
+
+            # Delete the key from dictionary
+            removed_entry = db_data["registered"][db_chat_id].pop(
+                curr_session_data["bus_stop_num_to_unreg"], None
+            )
+            if not removed_entry:
+                raise Exception(
+                    "Attempt to remove a non-registered bus stop. Something is so wrong..."
+                )
+            print(
+                f"[handle_callback_query][removed bus stop with entry] {removed_entry}"
+            )
+            text = f"Unregistered bus stop {removed_entry['desc']} (on {removed_entry['road_name']})"
+            send_message(chat_id, text)
+            reset_session(chat_id)
+        elif tbc_resource_type == "bus_stop" and verdict == "no":
+            print("[handle_callbackback_query][confirm delete][no]")
+            send_message(chat_id, "No bus stop unregistered! Done!")
+            reset_session(chat_id)
 
 
 def handle_message(message):
