@@ -599,20 +599,20 @@ def run():
     offset = None
     print("Bot is running...")
     try_delay = MIN_DELAY
-    try:
-        while True:
+    while True:
+        try:
             result = get_updates(offset)
             try_delay = MIN_DELAY  # reset back-off
             updates = result.get("result", [])
-
+    
             for update in updates:
                 handle_update(update)
                 offset = update["update_id"] + 1
-    except requests.exceptions.RequestException as e:
-        # Back-off and increment the delay for next round, before retry
-        print(f"Polling error happened: {e}. Retrying in {try_delay} secs...")
-        sleep(try_delay)
-        try_delay = min(try_delay * 2, MAX_DELAY)
+        except requests.exceptions.RequestException as e:
+            # Back-off and increment the delay for next round, before retry
+            print(f"Polling error happened: {e}. Retrying in {try_delay} secs...")
+            sleep(try_delay)
+            try_delay = min(try_delay * 2, MAX_DELAY)
 
 
 if __name__ == "__main__":
