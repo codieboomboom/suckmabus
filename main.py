@@ -16,6 +16,12 @@ LTA_API_SKIP_OFFSET = 500  # max number of record fetched per call to API
 
 MAX_DELAY = 60  # for exponential back-off
 MIN_DELAY = 1
+
+TIMEOUT_TELEGRAM_CONNECTION = 5
+TIMEOUT_TELEGRAM_READ = 35
+TIMEOUT_TELEGRAM_LIGHT_UPLOAD = 15
+TIMEOUT_LTA_CONNECTION = 5
+TIMEOUT_LTA_READ = 30
 # ============ States ===========================
 
 
@@ -94,7 +100,10 @@ def get_updates(offset=None):
     resp = requests.get(
         url=f"{TELEGRAM_BOT_BASEURL}/getUpdates",
         params=params,
-        timeout=35,  # need to be longer than the timeout from telegram bot, otw will cut it off prematurely
+        timeout=(
+            TIMEOUT_TELEGRAM_CONNECTION,
+            TIMEOUT_TELEGRAM_READ,
+        ),  # need to be longer than the timeout from telegram bot, otw will cut it off prematurely
     )
     return resp.json()
 
@@ -104,7 +113,11 @@ def send_message(chat_id, text, **kwargs):
     msg = {"chat_id": chat_id, "text": text}
     if kwargs:
         msg.update(kwargs)
-    requests.post(url=f"{TELEGRAM_BOT_BASEURL}/sendMessage", json=msg)
+    requests.post(
+        url=f"{TELEGRAM_BOT_BASEURL}/sendMessage",
+        json=msg,
+        timeout=(TIMEOUT_TELEGRAM_CONNECTION, TIMEOUT_TELEGRAM_LIGHT_UPLOAD),
+    )
 
 
 def parse_command(text: str):
@@ -124,7 +137,11 @@ def answer_callback_query(callback_query_id, **kwargs):
     payload = {"callback_query_id": callback_query_id}
     if kwargs:
         payload.update(kwargs)
-    requests.post(url=f"{TELEGRAM_BOT_BASEURL}/answerCallbackQuery", json=payload)
+    requests.post(
+        url=f"{TELEGRAM_BOT_BASEURL}/answerCallbackQuery",
+        json=payload,
+        timeout=(TIMEOUT_TELEGRAM_CONNECTION, TIMEOUT_TELEGRAM_LIGHT_UPLOAD),
+    )
 
 
 def handle_callback_query(callback_query):
@@ -539,7 +556,7 @@ def fetch_bus_stop_arrival(bus_stop_num):
     headers = {"accountKey": LTA_TOKEN}
     url = f"{LTA_BASEURL}/v3/BusArrival?BusStopCode={bus_stop_num}"
     resp = requests.get(
-        url, headers=headers
+        url, headers=headers, timeout=(TIMEOUT_LTA_CONNECTION, TIMEOUT_LTA_READ)
     )  # TODO: handle the case where nothing is return, as noted by the datamall api
     json_result = resp.json()
 
@@ -576,7 +593,9 @@ def fetch_all_bus_stops():
     # Here we needs to handle them until all entries are fetched
     while True:
         url = f"{LTA_BASEURL}/BusStops?$skip={skip_by}"
-        resp = requests.get(url, headers=headers)
+        resp = requests.get(
+            url, headers=headers, timeout=(TIMEOUT_LTA_CONNECTION, TIMEOUT_LTA_READ)
+        )
         json_result = resp.json()
 
         if "value" not in json_result or not json_result["value"]:
@@ -606,7 +625,7 @@ def run():
             result = get_updates(offset)
             try_delay = MIN_DELAY  # reset back-off
             updates = result.get("result", [])
-    
+
             for update in updates:
                 handle_update(update)
                 offset = update["update_id"] + 1
