@@ -110,7 +110,9 @@ def send_message(chat_id, text, **kwargs):
 def parse_command(text: str):
     # Parse and return the name of command and arguments
     # if text is not command, return None and an empty argument list
-    if not text.startswith("/") and len(text) > 1:
+    if not text.startswith("/") or not len(text):
+        return (None, [])
+    if text == "/":
         return (None, [])
 
     command_and_args = text[1:].split()
