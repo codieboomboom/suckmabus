@@ -67,5 +67,25 @@ class TelegramBotApiConfig(BaseConfig):
     read_timeout: int = field(metadata={"associated_env": "TIMEOUT_TELEGRAM_READ"})
 
 
+@dataclass(frozen=True)
+class LTADatamallApiConfig(BaseConfig):
+    base_url: str = field(metadata={"associated_env": "LTA_BASEURL"})
+    token: str = field(metadata={"associated_env": "LTA_DATAMALL_TOKEN"})
+    conn_timeout: int = field(metadata={"associated_env": "TIMEOUT_LTA_CONNECTION"})
+    read_timeout: int = field(metadata={"associated_env": "TIMEOUT_LTA_READ"})
+    pagination_size: int = field(
+        default=500, metadata={"associated_env": "LTA_API_SKIP_OFFSET"}
+    )
+
+
+@dataclass(frozen=True)
+class ApplicationConfig(BaseConfig):
+    exp_backoff_min_delay: int = field(metadata={"associated_env": "MIN_DELAY"})
+    exp_backoff_max_delay: int = field(metadata={"associated_env": "MAX_DELAY"})
+    exp_backoff_max_retry: int = field(metadata={"associated_env": "MAX_RETRY"})
+
+
 # Loading config into instances
 telegram_bot_config = TelegramBotApiConfig.load_config()
+lta_datamall_config = LTADatamallApiConfig.load_config()
+app_config = ApplicationConfig.load_config()
