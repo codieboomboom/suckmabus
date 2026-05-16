@@ -1,28 +1,11 @@
 import requests
-from dotenv import load_dotenv
-from os import environ
 from pathlib import Path
 from enum import Enum, auto
 from datetime import datetime, timezone, timedelta
 import json
 from time import sleep
+from config import lta_datamall_config, telegram_bot_config, app_config
 
-load_dotenv()
-TELEGRAM_BOT_TOKEN = environ.get("TELEGRAM_BOT_TOKEN")
-TELEGRAM_BOT_BASEURL = f"https://api.telegram.org/bot{TELEGRAM_BOT_TOKEN}"
-LTA_TOKEN = environ.get("LTA_DATAMALL_TOKEN")
-LTA_BASEURL = "https://datamall2.mytransport.sg/ltaodataservice"
-LTA_API_SKIP_OFFSET = 500  # max number of record fetched per call to API
-
-MAX_RETRY = 5
-MAX_DELAY = 60  # for exponential back-off
-MIN_DELAY = 1
-
-TIMEOUT_TELEGRAM_CONNECTION = 5
-TIMEOUT_TELEGRAM_READ = 35
-TIMEOUT_TELEGRAM_LIGHT_UPLOAD = 15
-TIMEOUT_LTA_CONNECTION = 5
-TIMEOUT_LTA_READ = 30
 # ============ States ===========================
 
 
@@ -99,11 +82,11 @@ def get_updates(offset=None):
         params["offset"] = offset
 
     resp = requests.get(
-        url=f"{TELEGRAM_BOT_BASEURL}/getUpdates",
+        url=f"{telegram_bot_config.base_url}/getUpdates",
         params=params,
         timeout=(
-            TIMEOUT_TELEGRAM_CONNECTION,
-            TIMEOUT_TELEGRAM_READ,
+            telegram_bot_config.conn_timeout,
+            telegram_bot_config.read_timeout,
         ),  # need to be longer than the timeout from telegram bot, otw will cut it off prematurely
     )
     return resp.json()
@@ -115,9 +98,12 @@ def send_message(chat_id, text, **kwargs):
     if kwargs:
         msg.update(kwargs)
     requests.post(
-        url=f"{TELEGRAM_BOT_BASEURL}/sendMessage",
+        url=f"{telegram_bot_config.base_url}/sendMessage",
         json=msg,
-        timeout=(TIMEOUT_TELEGRAM_CONNECTION, TIMEOUT_TELEGRAM_LIGHT_UPLOAD),
+        timeout=(
+            telegram_bot_config.conn_timeout,
+            telegram_bot_config.light_write_timeout,
+        ),
     )
 
 
@@ -139,9 +125,12 @@ def answer_callback_query(callback_query_id, **kwargs):
     if kwargs:
         payload.update(kwargs)
     requests.post(
-        url=f"{TELEGRAM_BOT_BASEURL}/answerCallbackQuery",
+        url=f"{telegram_bot_config.base_url}/answerCallbackQuery",
         json=payload,
-        timeout=(TIMEOUT_TELEGRAM_CONNECTION, TIMEOUT_TELEGRAM_LIGHT_UPLOAD),
+        timeout=(
+            telegram_bot_config.conn_timeout,
+            telegram_bot_config.light_write_timeout,
+        ),
     )
 
 
@@ -554,10 +543,12 @@ def fetch_bus_stop_arrival(bus_stop_num):
     """
     Query the LTA database using the bus_stop_num for a list of arriving buses
     """
-    headers = {"accountKey": LTA_TOKEN}
-    url = f"{LTA_BASEURL}/v3/BusArrival?BusStopCode={bus_stop_num}"
+    headers = {"accountKey": lta_datamall_config.token}
+    url = f"{lta_datamall_config.base_url}/v3/BusArrival?BusStopCode={bus_stop_num}"
     resp = requests.get(
-        url, headers=headers, timeout=(TIMEOUT_LTA_CONNECTION, TIMEOUT_LTA_READ)
+        url,
+        headers=headers,
+        timeout=(lta_datamall_config.conn_timeout, lta_datamall_config.read_timeout),
     )  # TODO: handle the case where nothing is return, as noted by the datamall api
     json_result = resp.json()
 
@@ -586,16 +577,21 @@ def fetch_all_bus_stops():
     where key is the bus stop number and the value is a dictionary of key-value
     pairs representing information of the bus stops
     """
-    headers = {"accountKey": LTA_TOKEN}
+    headers = {"accountKey": lta_datamall_config.token}
     bus_stops = []
     skip_by = 0  # Number of entry to skip
     # Based on https://datamall.lta.gov.sg/content/dam/datamall/datasets/LTA_DataMall_API_User_Guide.pdf
     # Currently, each API call only returns max LTA_API_SKIP_OFFSET
     # Here we needs to handle them until all entries are fetched
     while True:
-        url = f"{LTA_BASEURL}/BusStops?$skip={skip_by}"
+        url = f"{lta_datamall_config.base_url}/BusStops?$skip={skip_by}"
         resp = requests.get(
-            url, headers=headers, timeout=(TIMEOUT_LTA_CONNECTION, TIMEOUT_LTA_READ)
+            url,
+            headers=headers,
+            timeout=(
+                lta_datamall_config.conn_timeout,
+                lta_datamall_config.read_timeout,
+            ),
         )
         json_result = resp.json()
 
@@ -603,10 +599,10 @@ def fetch_all_bus_stops():
             break
 
         bus_stops.extend(json_result["value"])
-        if len(json_result["value"]) < LTA_API_SKIP_OFFSET:
+        if len(json_result["value"]) < lta_datamall_config.pagination_size:
             break
 
-        skip_by += LTA_API_SKIP_OFFSET
+        skip_by += lta_datamall_config.pagination_size
 
     # Need to be key-value format for easier storage into file database
     bus_stops_dict = {}
@@ -621,11 +617,11 @@ def run():
     offset = None
     print("Bot is running...")
     retry_cnt = 0
-    try_delay = MIN_DELAY
+    try_delay = app_config.exp_backoff_min_delay
     while True:
         try:
             result = get_updates(offset)
-            try_delay = MIN_DELAY  # reset back-off
+            try_delay = app_config.exp_backoff_min_delay  # reset back-off
             updates = result.get("result", [])
 
             for update in updates:
@@ -634,7 +630,7 @@ def run():
 
             retry_cnt = 0  # reset every success time
         except requests.exceptions.RequestException as e:
-            if retry_cnt >= MAX_RETRY:
+            if retry_cnt >= app_config.exp_backoff_max_retry:
                 print(
                     "Polling error happened but already hit max number of retry. Exitting..."
                 )
@@ -642,7 +638,7 @@ def run():
             # Back-off and increment the delay for next round, before retry
             print(f"Polling error happened: {e}. Retrying in {try_delay} secs...")
             sleep(try_delay)
-            try_delay = min(try_delay * 2, MAX_DELAY)
+            try_delay = min(try_delay * 2, app_config.exp_backoff_max_delay)
             retry_cnt += 1
 
 
