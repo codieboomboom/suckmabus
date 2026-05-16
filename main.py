@@ -14,6 +14,7 @@ LTA_TOKEN = environ.get("LTA_DATAMALL_TOKEN")
 LTA_BASEURL = "https://datamall2.mytransport.sg/ltaodataservice"
 LTA_API_SKIP_OFFSET = 500  # max number of record fetched per call to API
 
+MAX_RETRY = 5
 MAX_DELAY = 60  # for exponential back-off
 MIN_DELAY = 1
 
@@ -619,6 +620,7 @@ def run():
     init_db()
     offset = None
     print("Bot is running...")
+    retry_cnt = 0
     try_delay = MIN_DELAY
     while True:
         try:
@@ -629,11 +631,19 @@ def run():
             for update in updates:
                 handle_update(update)
                 offset = update["update_id"] + 1
+
+            retry_cnt = 0  # reset every success time
         except requests.exceptions.RequestException as e:
+            if retry_cnt >= MAX_RETRY:
+                print(
+                    "Polling error happened but already hit max number of retry. Exitting..."
+                )
+                break
             # Back-off and increment the delay for next round, before retry
             print(f"Polling error happened: {e}. Retrying in {try_delay} secs...")
             sleep(try_delay)
             try_delay = min(try_delay * 2, MAX_DELAY)
+            retry_cnt += 1
 
 
 if __name__ == "__main__":
