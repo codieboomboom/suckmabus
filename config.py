@@ -83,9 +83,4 @@ class ApplicationConfig(BaseConfig):
     exp_backoff_min_delay: int = field(metadata={"associated_env": "MIN_DELAY"})
     exp_backoff_max_delay: int = field(metadata={"associated_env": "MAX_DELAY"})
     exp_backoff_max_retry: int = field(metadata={"associated_env": "MAX_RETRY"})
-
-
-# Loading config into instances
-telegram_bot_config = TelegramBotApiConfig.load_config()
-lta_datamall_config = LTADatamallApiConfig.load_config()
-app_config = ApplicationConfig.load_config()
+    database_url: str = field(metadata={"associated_env": "DATABASE_URL"})
