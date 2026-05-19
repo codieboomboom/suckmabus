@@ -1,28 +1,11 @@
 import requests
-from dotenv import load_dotenv
-from os import environ
 from pathlib import Path
 from enum import Enum, auto
 from datetime import datetime, timezone, timedelta
 import json
 from time import sleep
+from config import TelegramBotApiConfig, LTADatamallApiConfig, ApplicationConfig
 
-load_dotenv()
-TELEGRAM_BOT_TOKEN = environ.get("TELEGRAM_BOT_TOKEN")
-TELEGRAM_BOT_BASEURL = f"https://api.telegram.org/bot{TELEGRAM_BOT_TOKEN}"
-LTA_TOKEN = environ.get("LTA_DATAMALL_TOKEN")
-LTA_BASEURL = "https://datamall2.mytransport.sg/ltaodataservice"
-LTA_API_SKIP_OFFSET = 500  # max number of record fetched per call to API
-
-MAX_RETRY = 5
-MAX_DELAY = 60  # for exponential back-off
-MIN_DELAY = 1
-
-TIMEOUT_TELEGRAM_CONNECTION = 5
-TIMEOUT_TELEGRAM_READ = 35
-TIMEOUT_TELEGRAM_LIGHT_UPLOAD = 15
-TIMEOUT_LTA_CONNECTION = 5
-TIMEOUT_LTA_READ = 30
 # ============ States ===========================
 
 
@@ -66,28 +49,25 @@ def update_state_and_data(chat_id: int, next_state: State, **updates):
 
 
 # ============= DB Management ===========================
-DATABASE_URL = "database.json"
-
-
-def write_to_db(data: dict):
-    with open(DATABASE_URL, "w", encoding="utf-8") as db:
+def write_to_db(app_cfg, data: dict):
+    with open(app_cfg.database_url, "w", encoding="utf-8") as db:
         json.dump(data, db, indent=4)
 
 
-def read_from_db():
-    with open(DATABASE_URL, "r", encoding="utf-8") as db:
+def read_from_db(app_cfg):
+    with open(app_cfg.database_url, "r", encoding="utf-8") as db:
         data = json.load(db)
     return data
 
 
-def init_db():
-    if not Path(DATABASE_URL).exists():
-        bus_stops_data = fetch_all_bus_stops()
-        write_to_db(data={"bus_stops": bus_stops_data, "registered": {}})
+def init_db(lta_cfg, app_cfg):
+    if not Path(app_cfg.database_url).exists():
+        bus_stops_data = fetch_all_bus_stops(lta_cfg)
+        write_to_db(app_cfg, data={"bus_stops": bus_stops_data, "registered": {}})
 
 
 # Telegram stuffs ===========
-def get_updates(offset=None):
+def get_updates(tlg_bot_cfg, offset=None):
     """Get updates from Telegram server via long polling"""
     # Long polling
     # only interested in "message" or "callback_query"
@@ -99,25 +79,28 @@ def get_updates(offset=None):
         params["offset"] = offset
 
     resp = requests.get(
-        url=f"{TELEGRAM_BOT_BASEURL}/getUpdates",
+        url=f"{tlg_bot_cfg.base_url}/getUpdates",
         params=params,
         timeout=(
-            TIMEOUT_TELEGRAM_CONNECTION,
-            TIMEOUT_TELEGRAM_READ,
+            tlg_bot_cfg.conn_timeout,
+            tlg_bot_cfg.read_timeout,
         ),  # need to be longer than the timeout from telegram bot, otw will cut it off prematurely
     )
     return resp.json()
 
 
-def send_message(chat_id, text, **kwargs):
+def send_message(tlg_bot_cfg, chat_id, text, **kwargs):
     """Send a reply back to user"""
     msg = {"chat_id": chat_id, "text": text}
     if kwargs:
         msg.update(kwargs)
     requests.post(
-        url=f"{TELEGRAM_BOT_BASEURL}/sendMessage",
+        url=f"{tlg_bot_cfg.base_url}/sendMessage",
         json=msg,
-        timeout=(TIMEOUT_TELEGRAM_CONNECTION, TIMEOUT_TELEGRAM_LIGHT_UPLOAD),
+        timeout=(
+            tlg_bot_cfg.conn_timeout,
+            tlg_bot_cfg.light_write_timeout,
+        ),
     )
 
 
@@ -134,25 +117,28 @@ def parse_command(text: str):
     return (command_and_args[0], command_and_args[1:])
 
 
-def answer_callback_query(callback_query_id, **kwargs):
+def answer_callback_query(tlg_bot_cfg, callback_query_id, **kwargs):
     payload = {"callback_query_id": callback_query_id}
     if kwargs:
         payload.update(kwargs)
     requests.post(
-        url=f"{TELEGRAM_BOT_BASEURL}/answerCallbackQuery",
+        url=f"{tlg_bot_cfg.base_url}/answerCallbackQuery",
         json=payload,
-        timeout=(TIMEOUT_TELEGRAM_CONNECTION, TIMEOUT_TELEGRAM_LIGHT_UPLOAD),
+        timeout=(
+            tlg_bot_cfg.conn_timeout,
+            tlg_bot_cfg.light_write_timeout,
+        ),
     )
 
 
-def handle_callback_query(callback_query):
+def handle_callback_query(tlg_bot_cfg, lta_cfg, app_cfg, callback_query):
     print("[handle_callback_query")
     # Answer the callback query first
     callback_query_id = callback_query["id"]
     if not callback_query_id:
         raise ValueError("callback_query_id must be present inside a callback query")
 
-    answer_callback_query(callback_query_id)
+    answer_callback_query(tlg_bot_cfg, callback_query_id)
     print(
         f"[handle_callback_query] Answered to callback_query with id {callback_query_id}"
     )
@@ -183,7 +169,7 @@ def handle_callback_query(callback_query):
         if tbc_resource_type == "bus_stop" and verdict == "yes":
             print("[handle_callback_query][confirm bus stop yes]")
             pending_bus_stop_num = curr_session_data["bus_stop_num"]
-            db_data = read_from_db()
+            db_data = read_from_db(app_cfg)
             db_chat_id = str(chat_id)  # for stupid reasons...
             # Create bus stop entry for this user: stop number, road name, description
             bus_stop_entry = {
@@ -199,15 +185,15 @@ def handle_callback_query(callback_query):
             # this part need to be handled as well (store in cache still, move
             # to next stage
             db_data["registered"][db_chat_id][pending_bus_stop_num] = bus_stop_entry
-            write_to_db(db_data)
+            write_to_db(app_cfg, db_data)
 
             text = f"Registered bus stop with {pending_bus_stop_num}"
-            send_message(chat_id, text)
+            send_message(tlg_bot_cfg, chat_id, text)
             reset_session(chat_id)
         elif tbc_resource_type == "bus_stop" and verdict == "no":
             print("[handle_callback_query][confirm bus stop no]")
             text = "Please provide another bus stop number or /cancel"
-            send_message(chat_id, text)
+            send_message(tlg_bot_cfg, chat_id, text)
             update_state_and_data(chat_id, State.REGISTER_AWAITING_BUS_STOP_NUM)
     elif curr_state == State.CHECK_AWAITING_SELECTION and command_in_process == "check":
         print(
@@ -215,7 +201,7 @@ def handle_callback_query(callback_query):
         )
         selected_bus_stop_num = callback_data_fields[3]
         bus_num_to_arrivals_timestamp_mapping = fetch_bus_stop_arrival(
-            selected_bus_stop_num
+            lta_cfg, selected_bus_stop_num
         )
         msg_parts = (
             [
@@ -236,7 +222,7 @@ def handle_callback_query(callback_query):
             if bus_arrival_msg:
                 msg_parts.append(bus_arrival_msg)
         text = "".join(msg_parts)
-        send_message(chat_id, text)
+        send_message(tlg_bot_cfg, chat_id, text)
         reset_session(chat_id)
     elif (
         curr_state == State.UNREGISTER_AWAITING_SELECTION
@@ -247,7 +233,7 @@ def handle_callback_query(callback_query):
             f"[handle_callback_query] Processing callback /{command_in_process} at stage {curr_state}"
         )
         pending_bus_stop_num = callback_data_fields[3]
-        db_data = read_from_db()
+        db_data = read_from_db(app_cfg)
 
         bus_stop_entry = {
             "bus_stop_num": pending_bus_stop_num,
@@ -271,7 +257,7 @@ def handle_callback_query(callback_query):
             ]
         }
         kwargs = {"reply_markup": confirm_keyboard_markup}
-        send_message(chat_id, text, **kwargs)
+        send_message(tlg_bot_cfg, chat_id, text, **kwargs)
         update_state_and_data(
             chat_id,
             State.UNREGISTER_AWAITING_CONFIRM,
@@ -289,7 +275,7 @@ def handle_callback_query(callback_query):
         # TODO: add an else Handle explicitly other option apart from these 2
         if tbc_resource_type == "bus_stop" and verdict == "yes":
             print("[handle_callback_query][confirm delete][yes]")
-            db_data = read_from_db()
+            db_data = read_from_db(app_cfg)
             db_chat_id = str(chat_id)
 
             # Delete the key from dictionary
@@ -300,20 +286,20 @@ def handle_callback_query(callback_query):
                 raise Exception(
                     "Attempt to remove a non-registered bus stop. Something is so wrong..."
                 )
-            write_to_db(db_data)
+            write_to_db(app_cfg, db_data)
             print(
                 f"[handle_callback_query][removed bus stop with entry] {removed_entry}"
             )
             text = f"Unregistered bus stop {removed_entry['desc']} (on {removed_entry['road_name']})"
-            send_message(chat_id, text)
+            send_message(tlg_bot_cfg, chat_id, text)
             reset_session(chat_id)
         elif tbc_resource_type == "bus_stop" and verdict == "no":
             print("[handle_callbackback_query][confirm delete][no]")
-            send_message(chat_id, "No bus stop unregistered! Done!")
+            send_message(tlg_bot_cfg, chat_id, "No bus stop unregistered! Done!")
             reset_session(chat_id)
 
 
-def handle_message(message):
+def handle_message(tlg_bot_cfg, app_cfg, message):
     print("[handle_message]")
     chat_id = message["chat"]["id"]
     text = message.get("text", "")  # could be a sticker/photo with no text
@@ -326,6 +312,7 @@ def handle_message(message):
     if command == "help":
         # Display help message
         send_message(
+            tlg_bot_cfg,
             chat_id,
             "Hi, I can help you with: \n"
             "/reg - Register a bus stop\n"
@@ -336,13 +323,13 @@ def handle_message(message):
         return
     elif command == "start":
         welcome_msg = """Hello, I am sucky-sucky 🚌. I can help track when is your next bus. Please /reg a bus stop first before /check your bus timing. More information using /help"""
-        send_message(chat_id, welcome_msg)
+        send_message(tlg_bot_cfg, chat_id, welcome_msg)
         reset_session(chat_id)
         return
     elif command == "cancel":
         # drop whatever been doing, reset session of the chat
         cancel_msg = "Cancelled current command! Let's try again"
-        send_message(chat_id, cancel_msg)
+        send_message(tlg_bot_cfg, chat_id, cancel_msg)
         reset_session(chat_id)
         return
 
@@ -354,13 +341,13 @@ def handle_message(message):
 
     if curr_state == State.IDLE and command == "reg":
         reply_text = "Please provide a valid bus stop number to register"
-        send_message(chat_id, reply_text)
+        send_message(tlg_bot_cfg, chat_id, reply_text)
         update_state_and_data(chat_id, next_state=State.REGISTER_AWAITING_BUS_STOP_NUM)
         return
 
     elif curr_state == State.IDLE and command == "check":
         # Ensure that there are bus stop registered first
-        db_data = read_from_db()
+        db_data = read_from_db(app_cfg)
         db_chat_id = str(chat_id)
         if (
             "registered" not in db_data
@@ -370,7 +357,7 @@ def handle_message(message):
             reply_text = (
                 "You don't seems to have any saved bus stop. Please /reg first!"
             )
-            send_message(chat_id, reply_text)
+            send_message(tlg_bot_cfg, chat_id, reply_text)
             reset_session(chat_id)
             return
         # Prepare list of bus stops as buttons to be selected
@@ -386,7 +373,9 @@ def handle_message(message):
             rows_on_inline_keyboard.append(keyboard_entry_as_row)
         selection_keyboard_markup = {"inline_keyboard": rows_on_inline_keyboard}
         # Send inline keyboard with selection of stored bus stop
-        send_message(chat_id, reply_text, reply_markup=selection_keyboard_markup)
+        send_message(
+            tlg_bot_cfg, chat_id, reply_text, reply_markup=selection_keyboard_markup
+        )
         update_state_and_data(chat_id, State.CHECK_AWAITING_SELECTION)
 
     elif curr_state == State.IDLE and command == "modify":
@@ -394,7 +383,7 @@ def handle_message(message):
         pass
     elif curr_state == State.IDLE and command == "unreg":
         # Check if there are anything to remove
-        db_data = read_from_db()
+        db_data = read_from_db(app_cfg)
         db_chat_id = str(chat_id)
         if (
             "registered" not in db_data
@@ -404,7 +393,7 @@ def handle_message(message):
             reply_text = (
                 "You don't seems to have any saved bus stop to remove. All good"
             )
-            send_message(chat_id, reply_text)
+            send_message(tlg_bot_cfg, chat_id, reply_text)
             reset_session(chat_id)
             return
 
@@ -421,20 +410,27 @@ def handle_message(message):
             rows_on_inline_keyboard.append(keyboard_entry_as_row)
         selection_keyboard_markup = {"inline_keyboard": rows_on_inline_keyboard}
         # Send inline keyboard with selection of stored bus stop
-        send_message(chat_id, reply_text, reply_markup=selection_keyboard_markup)
+        send_message(
+            tlg_bot_cfg, chat_id, reply_text, reply_markup=selection_keyboard_markup
+        )
         update_state_and_data(chat_id, State.UNREGISTER_AWAITING_SELECTION)
     elif curr_state == State.REGISTER_AWAITING_BUS_STOP_NUM:
         # Handle arriving bus stop number for registration
         if command:
-            send_message(chat_id, "Please enter a bus stop number only 🥺. Try again!")
+            send_message(
+                tlg_bot_cfg,
+                chat_id,
+                "Please enter a bus stop number only 🥺. Try again!",
+            )
         else:
             # Validate if the bus stop valid at all
             bus_stop_num = text.strip()
             print(f"[handle_message] Received bus stop number: {bus_stop_num}")
-            db_data = read_from_db()
+            db_data = read_from_db(app_cfg)
             db_chat_id = str(chat_id)
             if bus_stop_num not in db_data["bus_stops"]:
                 send_message(
+                    tlg_bot_cfg,
                     chat_id,
                     "Sorry, seems like your bus stop number not exist 🥺. Try again or /cancel to abort registration",
                 )
@@ -443,6 +439,7 @@ def handle_message(message):
                 and bus_stop_num in db_data["registered"][db_chat_id]
             ):
                 send_message(
+                    tlg_bot_cfg,
                     chat_id,
                     "You have registered this bus stop. Try a different one or /cancel to abort",
                 )
@@ -474,7 +471,7 @@ on {bus_stop_road_name}
                     ]
                 }
                 kwargs = {"reply_markup": confirm_keyboard_markup}
-                send_message(chat_id, reply_msg, **kwargs)
+                send_message(tlg_bot_cfg, chat_id, reply_msg, **kwargs)
                 # Store temporarily the bus_stop_num and move to wait for user confirm
                 ss_data_to_store = {"bus_stop_num": bus_stop_num}
                 update_state_and_data(
@@ -486,12 +483,13 @@ on {bus_stop_road_name}
     else:
         reset_session(chat_id)
         send_message(
+            tlg_bot_cfg,
             chat_id,
             "🥺 Sorry I don't understand you! Please refer to /help and try again!",
         )
 
 
-def handle_update(update):
+def handle_update(tlg_bot_cfg, lta_cfg, app_cfg, update):
     """
     This is where you decide what to do with each incoming message.
     We pull out the fields we care about and dispatch to handlers.
@@ -503,11 +501,11 @@ def handle_update(update):
     if update.get("callback_query"):
         # Handle callback query
         callback_query = update.get("callback_query")
-        handle_callback_query(callback_query)
+        handle_callback_query(tlg_bot_cfg, lta_cfg, app_cfg, callback_query)
     elif update.get("message"):
         # Handle message
         msg = update.get("message")
-        handle_message(msg)
+        handle_message(tlg_bot_cfg, app_cfg, msg)
     else:
         # an unimplemented update
         print(
@@ -550,14 +548,16 @@ def calc_minutes_to_arrival(timestamp_in_iso8601):
     return arrivals_minutes
 
 
-def fetch_bus_stop_arrival(bus_stop_num):
+def fetch_bus_stop_arrival(lta_cfg, bus_stop_num):
     """
     Query the LTA database using the bus_stop_num for a list of arriving buses
     """
-    headers = {"accountKey": LTA_TOKEN}
-    url = f"{LTA_BASEURL}/v3/BusArrival?BusStopCode={bus_stop_num}"
+    headers = {"accountKey": lta_cfg.token}
+    url = f"{lta_cfg.base_url}/v3/BusArrival?BusStopCode={bus_stop_num}"
     resp = requests.get(
-        url, headers=headers, timeout=(TIMEOUT_LTA_CONNECTION, TIMEOUT_LTA_READ)
+        url,
+        headers=headers,
+        timeout=(lta_cfg.conn_timeout, lta_cfg.read_timeout),
     )  # TODO: handle the case where nothing is return, as noted by the datamall api
     json_result = resp.json()
 
@@ -580,22 +580,27 @@ def fetch_bus_stop_arrival(bus_stop_num):
     return bus_arrivals
 
 
-def fetch_all_bus_stops():
+def fetch_all_bus_stops(lta_cfg):
     """
     Fetch all bus stops from the LTA database and return a dictionary
     where key is the bus stop number and the value is a dictionary of key-value
     pairs representing information of the bus stops
     """
-    headers = {"accountKey": LTA_TOKEN}
+    headers = {"accountKey": lta_cfg.token}
     bus_stops = []
     skip_by = 0  # Number of entry to skip
     # Based on https://datamall.lta.gov.sg/content/dam/datamall/datasets/LTA_DataMall_API_User_Guide.pdf
     # Currently, each API call only returns max LTA_API_SKIP_OFFSET
     # Here we needs to handle them until all entries are fetched
     while True:
-        url = f"{LTA_BASEURL}/BusStops?$skip={skip_by}"
+        url = f"{lta_cfg.base_url}/BusStops?$skip={skip_by}"
         resp = requests.get(
-            url, headers=headers, timeout=(TIMEOUT_LTA_CONNECTION, TIMEOUT_LTA_READ)
+            url,
+            headers=headers,
+            timeout=(
+                lta_cfg.conn_timeout,
+                lta_cfg.read_timeout,
+            ),
         )
         json_result = resp.json()
 
@@ -603,10 +608,10 @@ def fetch_all_bus_stops():
             break
 
         bus_stops.extend(json_result["value"])
-        if len(json_result["value"]) < LTA_API_SKIP_OFFSET:
+        if len(json_result["value"]) < lta_cfg.pagination_size:
             break
 
-        skip_by += LTA_API_SKIP_OFFSET
+        skip_by += lta_cfg.pagination_size
 
     # Need to be key-value format for easier storage into file database
     bus_stops_dict = {}
@@ -616,25 +621,25 @@ def fetch_all_bus_stops():
     return bus_stops_dict
 
 
-def run():
-    init_db()
+def run(tlg_bot_cfg, lta_cfg, app_cfg):
+    init_db(lta_cfg, app_cfg)
     offset = None
     print("Bot is running...")
     retry_cnt = 0
-    try_delay = MIN_DELAY
+    try_delay = app_cfg.exp_backoff_min_delay
     while True:
         try:
-            result = get_updates(offset)
-            try_delay = MIN_DELAY  # reset back-off
+            result = get_updates(tlg_bot_cfg, offset)
+            try_delay = app_cfg.exp_backoff_min_delay  # reset back-off
             updates = result.get("result", [])
 
             for update in updates:
-                handle_update(update)
+                handle_update(tlg_bot_cfg, lta_cfg, app_cfg, update)
                 offset = update["update_id"] + 1
 
             retry_cnt = 0  # reset every success time
         except requests.exceptions.RequestException as e:
-            if retry_cnt >= MAX_RETRY:
+            if retry_cnt >= app_cfg.exp_backoff_max_retry:
                 print(
                     "Polling error happened but already hit max number of retry. Exitting..."
                 )
@@ -642,9 +647,13 @@ def run():
             # Back-off and increment the delay for next round, before retry
             print(f"Polling error happened: {e}. Retrying in {try_delay} secs...")
             sleep(try_delay)
-            try_delay = min(try_delay * 2, MAX_DELAY)
+            try_delay = min(try_delay * 2, app_cfg.exp_backoff_max_delay)
             retry_cnt += 1
 
 
 if __name__ == "__main__":
-    run()
+    # Loading config into instances
+    telegram_bot_api_cfg = TelegramBotApiConfig.load_config()
+    lta_datamall_api_cfg = LTADatamallApiConfig.load_config()
+    app_cfg = ApplicationConfig.load_config()
+    run(telegram_bot_api_cfg, lta_datamall_api_cfg, app_cfg)
