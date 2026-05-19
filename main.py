@@ -303,9 +303,16 @@ def handle_message(tlg_bot_cfg, app_cfg, message):
     print("[handle_message]")
     chat_id = message["chat"]["id"]
     text = message.get("text", "")  # could be a sticker/photo with no text
+    chat_type = message["chat"]["type"]
 
     if not chat_id:
         raise ValueError("chat_id must be present in message type")
+
+    if chat_type != "private":
+        msg = "Sorry, I can only work in private chat mode. Try message me privately and retry!"
+        send_message(tlg_bot_cfg, chat_id, msg)
+        reset_session(chat_id)
+        return
 
     command, args = parse_command(text)
 
