@@ -137,6 +137,7 @@ def handle_callback_query(tlg_bot_cfg, lta_cfg, app_cfg, callback_query):
     callback_query_id = callback_query["id"]
     if not callback_query_id:
         raise ValueError("callback_query_id must be present inside a callback query")
+    chat_id = callback_query["from"]["id"]
 
     answer_callback_query(tlg_bot_cfg, callback_query_id)
     print(
@@ -150,9 +151,6 @@ def handle_callback_query(tlg_bot_cfg, lta_cfg, app_cfg, callback_query):
 
     callback_data_fields = callback_data.split(":")
     command_in_process = callback_data_fields[0]
-    # TODO: Does Telegram API works with integer chat_id only? Here need to
-    # convert back to integer as the way button callback make it a text
-    chat_id = int(callback_data_fields[1])  # protocol defined command:chat_id:blah:blah
     # Based on session data and the callback_query information
     # Function the FSM
     curr_session = get_session(chat_id)
@@ -163,8 +161,8 @@ def handle_callback_query(tlg_bot_cfg, lta_cfg, app_cfg, callback_query):
         print(
             f"[handle_callback_query] Processing callback for /{command_in_process} at stage {curr_state}"
         )
-        tbc_resource_type = callback_data_fields[2]
-        verdict = callback_data_fields[3]
+        tbc_resource_type = callback_data_fields[1]
+        verdict = callback_data_fields[2]
         # TODO: what about other option other than yes and no? Handle explicitly
         if tbc_resource_type == "bus_stop" and verdict == "yes":
             print("[handle_callback_query][confirm bus stop yes]")
@@ -199,7 +197,7 @@ def handle_callback_query(tlg_bot_cfg, lta_cfg, app_cfg, callback_query):
         print(
             f"[handle_callback_query] Processing callback for /{command_in_process} at stage {curr_state}"
         )
-        selected_bus_stop_num = callback_data_fields[3]
+        selected_bus_stop_num = callback_data_fields[2]
         bus_num_to_arrivals_timestamp_mapping = fetch_bus_stop_arrival(
             lta_cfg, selected_bus_stop_num
         )
@@ -232,7 +230,7 @@ def handle_callback_query(tlg_bot_cfg, lta_cfg, app_cfg, callback_query):
         print(
             f"[handle_callback_query] Processing callback /{command_in_process} at stage {curr_state}"
         )
-        pending_bus_stop_num = callback_data_fields[3]
+        pending_bus_stop_num = callback_data_fields[2]
         db_data = read_from_db(app_cfg)
 
         bus_stop_entry = {
@@ -247,11 +245,11 @@ def handle_callback_query(tlg_bot_cfg, lta_cfg, app_cfg, callback_query):
                 [
                     {
                         "text": "Yes",
-                        "callback_data": f"unreg:{chat_id}:bus_stop:yes",
+                        "callback_data": "unreg:bus_stop:yes",
                     },
                     {
                         "text": "No",
-                        "callback_data": f"unreg:{chat_id}:bus_stop:no",
+                        "callback_data": "unreg:bus_stop:no",
                     },
                 ]
             ]
@@ -270,8 +268,8 @@ def handle_callback_query(tlg_bot_cfg, lta_cfg, app_cfg, callback_query):
         print(
             f"[handle_callback_query] Processing callback for /{command_in_process} at stage {curr_state}"
         )
-        tbc_resource_type = callback_data_fields[2]
-        verdict = callback_data_fields[3]
+        tbc_resource_type = callback_data_fields[1]
+        verdict = callback_data_fields[2]
         # TODO: add an else Handle explicitly other option apart from these 2
         if tbc_resource_type == "bus_stop" and verdict == "yes":
             print("[handle_callback_query][confirm delete][yes]")
@@ -303,9 +301,15 @@ def handle_message(tlg_bot_cfg, app_cfg, message):
     print("[handle_message]")
     chat_id = message["chat"]["id"]
     text = message.get("text", "")  # could be a sticker/photo with no text
+    chat_type = message["chat"]["type"]
 
     if not chat_id:
         raise ValueError("chat_id must be present in message type")
+
+    if chat_type != "private":
+        msg = "Sorry, I can only work in private chat mode. Try message me privately and retry!"
+        send_message(tlg_bot_cfg, chat_id, msg)
+        return
 
     command, args = parse_command(text)
 
@@ -367,7 +371,7 @@ def handle_message(tlg_bot_cfg, app_cfg, message):
             keyboard_entry_as_row = [
                 {
                     "text": f"{bus_stop_entry['desc']} ({bus_stop_entry['road_name']})",
-                    "callback_data": f"check:{chat_id}:bus_arrival:{bus_stop_num}",
+                    "callback_data": f"check:bus_arrival:{bus_stop_num}",
                 }
             ]
             rows_on_inline_keyboard.append(keyboard_entry_as_row)
@@ -404,7 +408,7 @@ def handle_message(tlg_bot_cfg, app_cfg, message):
             keyboard_entry_as_row = [
                 {
                     "text": f"{bus_stop_entry['desc']} ({bus_stop_entry['road_name']})",
-                    "callback_data": f"unreg:{chat_id}:bus_stop:{bus_stop_num}",
+                    "callback_data": f"unreg:bus_stop:{bus_stop_num}",
                 }
             ]
             rows_on_inline_keyboard.append(keyboard_entry_as_row)
@@ -461,11 +465,11 @@ on {bus_stop_road_name}
                         [
                             {
                                 "text": "Yes",
-                                "callback_data": f"reg:{chat_id}:bus_stop:yes",
+                                "callback_data": "reg:bus_stop:yes",
                             },
                             {
                                 "text": "No",
-                                "callback_data": f"reg:{chat_id}:bus_stop:no",
+                                "callback_data": "reg:bus_stop:no",
                             },
                         ]
                     ]
